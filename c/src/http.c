@@ -46,12 +46,16 @@ int connect_to_host_with_port(const char *host, const char *port) {
 		.ai_next      = 0
 	};
 	struct addrinfo *res = NULL;
-	int request_fd;
+	int request_fd = 0;
 
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 
-	getaddrinfo(host, port, &hints, &res);
+	int err = 0;
+	if ((err = getaddrinfo(host, port, &hints, &res)) != 0) {
+		printf("Could not get address information: %s", gai_strerror(err));
+		goto error;
+	}
 
 	request_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (request_fd < 0) {
@@ -158,8 +162,9 @@ char *receieve_only_http_header(const int request_fd, const int timeout, size_t 
 		goto error;
 
 	const size_t header_size = header_end - raw_buf;
-	char *to_return = malloc(header_size);
+	char *to_return = malloc(header_size + 1);
 	memcpy(to_return, raw_buf, header_size);
+	to_return[header_size] = '\0';
 	*out = header_size;
 	free(raw_buf);
 
@@ -201,8 +206,11 @@ unsigned char *receive_http_with_timeout(const int request_fd, const int timeout
 		ioctl(request_fd, FIONREAD, &count);
 		if (count <= 0 && result_size == payload_received)
 			break;
-		else if (count <= 0) /* Continue waiting. */
+		else if (count <= 0) { /* Continue waiting. */
+			if (times_read > 10000)
+				goto error;
 			continue;
+		}
 		int old_offset = buf_size;
 		buf_size += count;
 		if (raw_buf != NULL) {
